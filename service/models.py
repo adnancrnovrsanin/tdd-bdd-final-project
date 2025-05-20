@@ -30,7 +30,7 @@ available (boolean) - True for products that are available for adoption
 """
 import logging
 from enum import Enum
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation as DecimalInvalidOperation
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
@@ -132,7 +132,12 @@ class Product(db.Model):
         try:
             self.name = data["name"]
             self.description = data["description"]
-            self.price = Decimal(data["price"])
+            try:
+                self.price = Decimal(data["price"])
+            except DecimalInvalidOperation as error: # Catch Decimal specific error
+                raise DataValidationError(
+                    f"Invalid price format: {data['price']}"
+                ) from error
             if isinstance(data["available"], bool):
                 self.available = data["available"]
             else:
@@ -142,10 +147,13 @@ class Product(db.Model):
                 )
             self.category = getattr(Category, data["category"])  # create enum from string
         except AttributeError as error:
-            raise DataValidationError("Invalid attribute: " + error.args[0]) from error
+            # This will catch if data["category"] is not a valid enum member string
+            # or if Category itself doesn't have the attribute.
+            # error.args[0] might be the problematic category string.
+            raise DataValidationError(f"Invalid attribute or category value: {error.args[0] if error.args else 'unknown'}") from error
         except KeyError as error:
-            raise DataValidationError("Invalid product: missing " + error.args[0]) from error
-        except TypeError as error:
+            raise DataValidationError(f"Invalid product: missing {error.args[0]}") from error
+        except TypeError as error: # This is now more for non-dict data or unexpected structure
             raise DataValidationError(
                 "Invalid product: body of request contained bad or no data " + str(error)
             ) from error

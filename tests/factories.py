@@ -20,6 +20,7 @@ Test Factory to make fake objects for testing
 import factory
 from factory.fuzzy import FuzzyChoice, FuzzyDecimal
 from service.models import Product, Category
+# from decimal import Decimal # Not strictly needed here if FuzzyDecimal handles it, but good for clarity if used directly
 
 
 class ProductFactory(factory.Factory):
@@ -47,7 +48,7 @@ class ProductFactory(factory.Factory):
         ]
     )
     description = factory.Faker("text")
-    price = FuzzyDecimal(0.5, 2000.0, 2)
+    price = FuzzyDecimal(0.5, 2000.0, 2) # Your existing definition is good
     available = FuzzyChoice(choices=[True, False])
     category = FuzzyChoice(
         choices=[
@@ -59,3 +60,17 @@ class ProductFactory(factory.Factory):
             Category.TOOLS,
         ]
     )
+
+    @classmethod
+    def stub_create_data(cls):
+        """Generates a dictionary of product data without creating a Product instance."""
+        # Use build() to get a Product instance with fake data, then serialize its relevant fields
+        # This ensures the stub data structure matches what deserialize expects
+        fake_product = cls.build() # This creates an unsaved Product instance
+        return {
+            "name": fake_product.name,
+            "description": fake_product.description,
+            "price": str(fake_product.price), # Ensure price is a string, as it might come from JSON
+            "available": fake_product.available,
+            "category": fake_product.category.name # Use the enum's name
+        }

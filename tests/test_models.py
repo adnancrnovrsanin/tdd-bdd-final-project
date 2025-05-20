@@ -30,6 +30,7 @@ from decimal import Decimal
 from service.models import Product, Category, db
 from service import app
 from tests.factories import ProductFactory
+from service.models import Product, Category, db, DataValidationError
 
 DATABASE_URI = os.getenv(
     "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -189,3 +190,126 @@ class TestProductModel(unittest.TestCase):
         self.assertEqual(found.count(), count)
         for product in found:
             self.assertEqual(product.category, category)
+
+    ######################################################################
+    #  A D D I T I O N A L   T E S T   C A S E S
+    ######################################################################
+
+    def test_repr(self):
+        """It should have a string representation"""
+        product = Product(name="Fedora", description="A red hat", price=12.50, available=True, category=Category.CLOTHS)
+        self.assertEqual(str(product), "<Product Fedora id=[None]>")
+        product.id = 1
+        self.assertEqual(str(product), "<Product Fedora id=[1]>")
+
+    def test_update_product_no_id(self):
+        """It should not Update a Product with no ID"""
+        product = ProductFactory()
+        product.id = None # Ensure id is None
+        self.assertRaises(DataValidationError, product.update)
+
+    def test_deserialize_invalid_available_type(self):
+        """It should not deserialize with an invalid type for 'available'"""
+        product = Product()
+        test_data = ProductFactory.stub_create_data()
+        test_data["available"] = "true" # Invalid type, should be boolean
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data)
+        self.assertIn("Invalid type for boolean [available]", str(context.exception))
+
+    def test_deserialize_invalid_category(self):
+        """It should not deserialize with an invalid category"""
+        product = Product()
+        test_data = ProductFactory.stub_create_data()
+        invalid_category_name = "INVALID_CATEGORY" # Not a valid Category enum member
+        test_data["category"] = invalid_category_name
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data)
+        # Updated assertion to match the new error message format
+        self.assertIn(f"Invalid attribute or category value: {invalid_category_name}", str(context.exception))
+
+    def test_deserialize_missing_data(self):
+        """It should not deserialize with missing data"""
+        product = Product()
+        test_data = ProductFactory.stub_create_data()
+        del test_data["name"] # Missing 'name'
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data)
+        # Corrected assertion: remove single quotes around 'name'
+        self.assertIn("Invalid product: missing name", str(context.exception))
+
+        test_data_no_price = ProductFactory.stub_create_data()
+        del test_data_no_price["price"] # Missing 'price'
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data_no_price)
+        # Corrected assertion: remove single quotes around 'price'
+        self.assertIn("Invalid product: missing price", str(context.exception))
+
+        # Example for another missing key, e.g., description
+        test_data_no_description = ProductFactory.stub_create_data()
+        del test_data_no_description["description"]
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data_no_description)
+        self.assertIn("Invalid product: missing description", str(context.exception))
+
+    def test_deserialize_bad_data(self):
+        """It should not deserialize with bad data or invalid formats"""
+        product = Product()
+
+        # Test with None input
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(None) # Non-dict input
+        self.assertIn("bad or no data", str(context.exception))
+
+        # Test with non-dict input
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize("not a dict") # Non-dict input
+        self.assertIn("bad or no data", str(context.exception))
+
+        # Test for TypeError when converting price if it's not convertible to Decimal
+        test_data_bad_price = ProductFactory.stub_create_data()
+        bad_price_value = "not-a-number"
+        test_data_bad_price["price"] = bad_price_value
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(test_data_bad_price)
+        # Check for the more specific error message from the new catch block
+        self.assertIn(f"Invalid price format: {bad_price_value}", str(context.exception))
+
+
+    def test_find_by_price_string(self):
+        """It should Find Products by Price given as a string"""
+        product1 = ProductFactory(price=Decimal("10.99"))
+        product1.create()
+        product2 = ProductFactory(price=Decimal("20.50"))
+        product2.create()
+        product3 = ProductFactory(price=Decimal("10.99"))
+        product3.create()
+
+        # Test with plain string
+        found_products = Product.find_by_price("10.99")
+        self.assertEqual(found_products.count(), 2)
+        for product in found_products:
+            self.assertEqual(product.price, Decimal("10.99"))
+
+        # Test with string containing spaces that strip should handle
+        found_products_spaced = Product.find_by_price(' "10.99" ')
+        self.assertEqual(found_products_spaced.count(), 2)
+        for product in found_products_spaced:
+            self.assertEqual(product.price, Decimal("10.99"))
+
+    def test_serialize_product(self):
+        """It should serialize a Product into a dictionary"""
+        product = ProductFactory()
+        product.id = None # Simulate before creation
+        data = product.serialize()
+        self.assertEqual(data["id"], None)
+        self.assertEqual(data["name"], product.name)
+        self.assertEqual(data["description"], product.description)
+        self.assertEqual(data["price"], str(product.price)) # Price is stringified
+        self.assertEqual(data["available"], product.available)
+        self.assertEqual(data["category"], product.category.name)
+
+        # After creation
+        product.create()
+        data_created = product.serialize()
+        self.assertEqual(data_created["id"], product.id)
